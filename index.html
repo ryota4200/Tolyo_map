@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>東京観光ガイド | Tokyo Spot Explorer</title>
+
+    <!-- Tailwind CSS (Play CDN v4) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <!-- Leaflet CSS & JS (v1.9.4) -->
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    />
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+
+    <style>
+        /* 現在地マーカーのパルスアニメーション */
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.8);
+                opacity: 0.8;
+            }
+            100% {
+                transform: scale(2.4);
+                opacity: 0;
+            }
+        }
+        .user-location-pulse {
+            animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        /* 横スクロール時のスクロールバー非表示（スマホのカテゴリバー用） */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* Leafletポップアップの微調整 */
+        .leaflet-popup-content-wrapper {
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <!-- ヘッダー -->
+    <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </div>
+                <div class="truncate">
+                    <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-900 truncate">
+                        東京観光ガイド
+                    </h1>
+                    <p class="text-[11px] sm:text-xs text-slate-500 truncate">
+                        Tokyo Spot Explorer
+                    </p>
+                </div>
+            </div>
+
+            <!-- 現在地取得ボタン -->
+            <button
+                id="locate-btn"
+                type="button"
+                class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs sm:text-sm font-medium bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 active:scale-95 transition cursor-pointer shrink-0"
+            >
+                <svg id="locate-icon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="hidden" />
+                    <circle cx="12" cy="12" r="3" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v3m0 14v3m10-10h-3M5 12H2" />
+                </svg>
+                <span id="locate-btn-text">現在地を取得</span>
+            </button>
+        </div>
+
+        <!-- カテゴリフィルター & ソートバー（ヘッダー直下） -->
+        <div class="border-t border-slate-100 bg-white">
+            <div class="max-w-6xl mx-auto px-4 py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                <!-- カテゴリボタン群（JSで自動生成） -->
+                <div
+                    id="category-filters"
+                    class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5 sm:pb-0"
+                    role="tablist"
+                    aria-label="カテゴリフィルター"
+                >
+                    <!-- 動的生成 -->
+                </div>
+
+                <!-- 件数表示 & 近い順ソートボタン -->
+                <div class="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                    <span id="spot-count" class="text-xs text-slate-500 font-medium">
+                        読み込み中...
+                    </span>
+                    <button
+                        id="sort-distance-btn"
+                        type="button"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:scale-95 transition cursor-pointer"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                        </svg>
+                        <span>近い順に並べる</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 通知バナー（エラー・ステータス表示用） -->
+    <div id="status-banner" class="hidden max-w-6xl w-full mx-auto px-4 pt-3">
+        <div id="status-banner-inner" class="rounded-xl px-4 py-2.5 text-xs sm:text-sm flex items-center justify-between gap-3 border">
+            <span id="status-message"></span>
+            <button id="status-close-btn" type="button" class="text-current opacity-60 hover:opacity-100 cursor-pointer shrink-0" aria-label="閉じる">✕</button>
+        </div>
+    </div>
+
+    <!-- メインコンテンツ -->
+    <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-4 space-y-6">
+
+        <!-- 地図セクション（isolationでLeafletのz-indexがヘッダーに被るのを防ぐ） -->
+        <section aria-label="観光スポットマップ" class="relative isolate z-10 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div id="map" class="w-full h-[46vh] min-h-[320px] max-h-[520px] bg-slate-100"></div>
+            <div class="px-4 py-2 bg-white border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex items-center gap-1">
+                        <span class="w-2.5 h-2.5 rounded-full bg-sky-600 inline-block"></span>
+                        観光スポット
+                    </span>
+                    <span class="inline-flex items-center gap-1">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200 inline-block"></span>
+                        現在地
+                    </span>
+                </div>
+                <span>ピンまたは下のカードから詳細を確認できます</span>
+            </div>
+        </section>
+
+        <!-- スポット一覧セクション（画面下部・カード型レイアウト） -->
+        <section aria-label="観光スポット一覧">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-base sm:text-lg font-bold text-slate-900">
+                    スポット一覧
+                </h2>
+                <span id="sort-status-label" class="text-xs text-slate-500">
+                    標準順
+                </span>
+            </div>
+
+            <!-- カードグリッド -->
+            <div id="spot-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- 動的生成 -->
+            </div>
+
+            <!-- 空状態メッセージ -->
+            <div id="empty-state" class="hidden text-center py-12 bg-white rounded-2xl border border-slate-200">
+                <p class="text-sm text-slate-500">該当する観光スポットが見つかりませんでした。</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- フッター -->
+    <footer class="mt-8 border-t border-slate-200 bg-white">
+        <div class="max-w-6xl mx-auto px-4 py-5 text-center text-xs text-slate-400">
+            Tokyo Spot Explorer &mdash; Map data &copy; OpenStreetMap contributors
+        </div>
+    </footer>
+
+    <!-- アプリケーションロジック (Vanilla JS) -->
+    <script>
+        (() => {
+            'use strict';
+
+            // --- アプリケーション状態管理 ---
+            const state = {
+                spots: [],
+                selectedCategory: 'すべて',
+                userLocation: null, // { lat, lng }
+                sortByDistance: false,
+                isLocating: false,
+                markersById: new Map(),
+            };
+
+            // --- カテゴリ別スタイル定義 ---
+            const CATEGORY_STYLES = {
+                '歴史': {
+                    badge: 'bg-amber-50 text-amber-700 border-amber-200',
+                    pinColor: '#d97706', // amber-600
+                },
+                'グルメ': {
+                    badge: 'bg-rose-50 text-rose-700 border-rose-200',
+                    pinColor: '#e11d48', // rose-600
+                },
+                'ショッピング': {
+                    badge: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                    pinColor: '#4f46e5', // indigo-600
+                },
+                '自然': {
+                    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                    pinColor: '#059669', // emerald-600
+                },
+                default: {
+                    badge: 'bg-sky-50 text-sky-700 border-sky-200',
+                    pinColor: '#0284c7', // sky-600
+                },
+            };
+
+            // --- DOM要素の参照 ---
+            const dom = {
+                categoryFilters: document.getElementById('category-filters'),
+                spotList: document.getElementById('spot-list'),
+                spotCount: document.getElementById('spot-count'),
+                emptyState: document.getElementById('empty-state'),
+                locateBtn: document.getElementById('locate-btn'),
+                locateBtnText: document.getElementById('locate-btn-text'),
+                sortDistanceBtn: document.getElementById('sort-distance-btn'),
+                sortStatusLabel: document.getElementById('sort-status-label'),
+                statusBanner: document.getElementById('status-banner'),
+                statusBannerInner: document.getElementById('status-banner-inner'),
+                statusMessage: document.getElementById('status-message'),
+                statusCloseBtn: document.getElementById('status-close-btn'),
+                mapSection: document.getElementById('map'),
+            };
+
+            // --- Leaflet マップ初期化（初期中心: 東京駅周辺） ---
+            const map = L.map('map', {
+                zoomControl: true,
+                scrollWheelZoom: true,
+            }).setView([35.681236, 139.767125], 12);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            }).addTo(map);
+
+            const spotLayerGroup = L.layerGroup().addTo(map);
+            let userMarker = null;
+
+            // --- ユーティリティ関数 ---
+            function escapeHTML(str) {
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            /**
+             * ハーバーサイン公式により2点間の距離（km）を算出
+             */
+            function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+                const R = 6371; // 地球の半径 (km)
+                const toRad = (deg) => (deg * Math.PI) / 180;
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                const a =
+                    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+            }
+
+            function formatDistance(km) {
+                if (km === null || km === undefined) return '';
+                if (km < 1) {
+                    return `${Math.round(km * 1000)} m`;
+                }
+                return `${km.toFixed(1)} km`;
+            }
+
+            function getCategoryStyle(category) {
+                return CATEGORY_STYLES[category] || CATEGORY_STYLES.default;
+            }
+
+            function showBanner(message, type = 'info') {
+                const styles = {
+                    info: 'bg-sky-50 text-sky-800 border-sky-200',
+                    success: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+                    error: 'bg-rose-50 text-rose-800 border-rose-200',
+                };
+                dom.statusBannerInner.className =
+                    `rounded-xl px-4 py-2.5 text-xs sm:text-sm flex items-center justify-between gap-3 border ${styles[type] || styles.info}`;
+                dom.statusMessage.textContent = message;
+                dom.statusBanner.classList.remove('hidden');
+            }
+
+            function hideBanner() {
+                dom.statusBanner.classList.add('hidden');
+            }
+
+            // --- カスタムマーカーアイコン生成 ---
+            function createSpotIcon(color) {
+                return L.divIcon({
+                    className: '',
+                    html: `
+                        <svg width="30" height="38" viewBox="0 0 30 38" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));">
+                            <path d="M15 0C6.71573 0 0 6.71573 0 15C0 25.5 15 38 15 38C15 38 30 25.5 30 15C30 6.71573 23.2843 0 15 0Z" fill="${color}"/>
+                            <circle cx="15" cy="14" r="5.5" fill="white"/>
+                        </svg>
+                    `,
+                    iconSize: [30, 38],
+                    iconAnchor: [15, 38],
+                    popupAnchor: [0, -34],
+                });
+            }
+
+            function createUserLocationIcon() {
+                return L.divIcon({
+                    className: '',
+                    html: `
+                        <div class="relative w-6 h-6 flex items-center justify-center">
+                            <span class="user-location-pulse absolute inset-0 rounded-full bg-emerald-400"></span>
+                            <span class="relative w-4 h-4 rounded-full bg-emerald-500 border-2 border-white shadow-md"></span>
+                        </div>
+                    `,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12],
+                    popupAnchor: [0, -12],
+                });
+            }
+
+            // --- データ取得 ---
+            async function loadSpots() {
+                try {
+                    const response = await fetch('./spots.json');
+                    if (!response.ok) {
+                        throw new Error(`HTTPエラー (${response.status})`);
+                    }
+                    const data = await response.json();
+                    if (!Array.isArray(data)) {
+                        throw new Error('JSONデータの形式が不正です。');
+                    }
+                    state.spots = data;
+                    renderCategoryButtons();
+                    renderAll();
+                } catch (error) {
+                    console.error('spots.json の読み込みに失敗:', error);
+                    dom.spotCount.textContent = '0 件';
+                    showBanner(
+                        '観光データの読み込みに失敗しました。ローカルサーバー（http://localhost）経由で開いているか確認してください。',
+                        'error'
+                    );
+                }
+            }
+
+            // --- カテゴリボタンの自動生成 ---
+            function renderCategoryButtons() {
+                const uniqueCategories = [...new Set(state.spots.map((s) => s.category))];
+                const categories = ['すべて', ...uniqueCategories];
+
+                dom.categoryFilters.innerHTML = categories
+                    .map((cat) => {
+                        const isActive = state.selectedCategory === cat;
+                        const activeClass = isActive
+                            ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900';
+
+                        return `
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected="${isActive}"
+                                data-category="${escapeHTML(cat)}"
+                                class="category-btn whitespace-nowrap px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium border transition cursor-pointer ${activeClass}"
+                            >
+                                ${escapeHTML(cat)}
+                            </button>
+                        `;
+                    })
+                    .join('');
+            }
+
+            // --- 表示対象データの抽出・距離計算・ソート ---
+            function getProcessedSpots() {
+                let list = state.spots.map((spot) => {
+                    const distanceKm = state.userLocation
+                        ? calculateDistanceKm(
+                              state.userLocation.lat,
+                              state.userLocation.lng,
+                              spot.latitude,
+                              spot.longitude
+                          )
+                        : null;
+                    return { ...spot, distanceKm };
+                });
+
+                if (state.selectedCategory !== 'すべて') {
+                    list = list.filter((spot) => spot.category === state.selectedCategory);
+                }
+
+                if (state.sortByDistance && state.userLocation) {
+                    list.sort((a, b) => a.distanceKm - b.distanceKm);
+                }
+
+                return list;
+            }
+
+            // --- 地図ピンの描画 ---
+            function renderMapMarkers(spots) {
+                spotLayerGroup.clearLayers();
+                state.markersById.clear();
+
+                if (spots.length === 0) return;
+
+                const bounds = L.latLngBounds();
+
+                spots.forEach((spot) => {
+                    const style = getCategoryStyle(spot.category);
+                    const marker = L.marker([spot.latitude, spot.longitude], {
+                        icon: createSpotIcon(style.pinColor),
+                    });
+
+                    const distanceBadge = spot.distanceKm !== null
+                        ? `<span class="inline-block ml-1.5 px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded">現在地から ${escapeHTML(formatDistance(spot.distanceKm))}</span>`
+                        : '';
+
+                    const popupHtml = `
+                        <div class="min-w-[200px] max-w-[240px] font-sans">
+                            <div class="mb-1 flex items-center flex-wrap gap-1">
+                                <span class="inline-block px-2 py-0.5 text-[10px] font-semibold rounded-full border ${style.badge}">
+                                    ${escapeHTML(spot.category)}
+                                </span>
+                                ${distanceBadge}
+                            </div>
+                            <h3 class="text-sm font-bold text-slate-900 mb-1">${escapeHTML(spot.name)}</h3>
+                            <p class="text-xs text-slate-600 leading-relaxed mb-2">${escapeHTML(spot.description)}</p>
+                            <p class="text-[11px] text-slate-400 mb-2">${escapeHTML(spot.address)}</p>
+                            <a
+                                href="https://www.google.com/maps/search/?api=1&query=${spot.latitude},${spot.longitude}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="inline-flex items-center text-xs font-medium text-sky-600 hover:underline"
+                            >
+                                Googleマップで開く &rarr;
+                            </a>
+                        </div>
+                    `;
+
+                    marker.bindPopup(popupHtml);
+                    marker.addTo(spotLayerGroup);
+                    state.markersById.set(spot.id, marker);
+                    bounds.extend([spot.latitude, spot.longitude]);
+                });
+
+                if (state.userLocation) {
+                    bounds.extend([state.userLocation.lat, state.userLocation.lng]);
+                }
+
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+            }
+
+            // --- スポットカードリストの描画 ---
+            function renderSpotList(spots) {
+                dom.spotCount.textContent = `${spots.length} 件表示`;
+
+                if (spots.length === 0) {
+                    dom.spotList.innerHTML = '';
+                    dom.emptyState.classList.remove('hidden');
+                    return;
+                }
+
+                dom.emptyState.classList.add('hidden');
+
+                dom.spotList.innerHTML = spots
+                    .map((spot) => {
+                        const style = getCategoryStyle(spot.category);
+                        const distanceHtml =
+                            spot.distanceKm !== null
+                                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                        </svg>
+                                        ${escapeHTML(formatDistance(spot.distanceKm))}
+                                   </span>`
+                                : '';
+
+                        return `
+                            <article class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-sky-200 transition flex flex-col justify-between">
+                                <div>
+                                    <div class="flex items-center justify-between gap-2 mb-2.5">
+                                        <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.badge}">
+                                            ${escapeHTML(spot.category)}
+                                        </span>
+                                        ${distanceHtml}
+                                    </div>
+                                    <h3 class="text-base font-bold text-slate-900 mb-1.5">
+                                        ${escapeHTML(spot.name)}
+                                    </h3>
+                                    <p class="text-sm text-slate-600 leading-relaxed mb-3">
+                                        ${escapeHTML(spot.description)}
+                                    </p>
+                                </div>
+
+                                <div class="pt-3 border-t border-slate-100 space-y-3">
+                                    <p class="text-xs text-slate-500 flex items-start gap-1.5">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
+                                        <span>${escapeHTML(spot.address)}</span>
+                                    </p>
+
+                                    <div class="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            data-focus-id="${spot.id}"
+                                            class="focus-map-btn flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 transition cursor-pointer"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                            </svg>
+                                            地図で見る
+                                        </button>
+                                        <a
+                                            href="https://www.google.com/maps/search/?api=1&query=${spot.latitude},${spot.longitude}"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="inline-flex items-center justify-center px-3 py-2 rounded-xl text-xs font-medium bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 transition"
+                                        >
+                                            経路
+                                        </a>
+                                    </div>
+                                </div>
+                            </article>
+                        `;
+                    })
+                    .join('');
+            }
+
+            // --- ソートボタンの見た目更新 ---
+            function updateSortButtonUI() {
+                if (state.sortByDistance && state.userLocation) {
+                    dom.sortDistanceBtn.className =
+                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white border border-emerald-600 shadow-xs transition cursor-pointer';
+                    dom.sortStatusLabel.textContent = '現在地から近い順';
+                } else {
+                    dom.sortDistanceBtn.className =
+                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:scale-95 transition cursor-pointer';
+                    dom.sortStatusLabel.textContent = '標準順';
+                }
+            }
+
+            // --- 画面全体を再描画 ---
+            function renderAll() {
+                const processed = getProcessedSpots();
+                updateSortButtonUI();
+                renderMapMarkers(processed);
+                renderSpotList(processed);
+            }
+
+            // --- 現在地取得処理 (Promise) ---
+            function requestUserLocation() {
+                return new Promise((resolve, reject) => {
+                    if (!navigator.geolocation) {
+                        reject(new Error('お使いのブラウザは位置情報の取得に対応していません。'));
+                        return;
+                    }
+                    if (state.isLocating) return;
+
+                    state.isLocating = true;
+                    dom.locateBtn.disabled = true;
+                    dom.locateBtnText.textContent = '取得中...';
+
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const { latitude, longitude } = position.coords;
+                            state.userLocation = { lat: latitude, lng: longitude };
+                            state.isLocating = false;
+                            dom.locateBtn.disabled = false;
+                            dom.locateBtnText.textContent = '現在地を更新';
+                            dom.locateBtn.className =
+                                'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs sm:text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 active:scale-95 transition cursor-pointer shrink-0';
+
+                            // 現在地マーカーの配置・更新
+                            if (userMarker) {
+                                userMarker.setLatLng([latitude, longitude]);
+                            } else {
+                                userMarker = L.marker([latitude, longitude], {
+                                    icon: createUserLocationIcon(),
+                                    zIndexOffset: 1000,
+                                })
+                                    .bindPopup('<strong class="text-xs font-bold text-emerald-700">あなたの現在地</strong>')
+                                    .addTo(map);
+                            }
+
+                            showBanner('現在地を取得しました。各スポットまでの距離を表示しています。', 'success');
+                            resolve(state.userLocation);
+                        },
+                        (error) => {
+                            state.isLocating = false;
+                            dom.locateBtn.disabled = false;
+                            dom.locateBtnText.textContent = '現在地を取得';
+
+                            let message = '現在地の取得に失敗しました。';
+                            if (error.code === error.PERMISSION_DENIED) {
+                                message = '位置情報の利用が許可されていません。ブラウザの設定をご確認ください。';
+                            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                                message = '位置情報を取得できませんでした。電波状況をご確認ください。';
+                            } else if (error.code === error.TIMEOUT) {
+                                message = '位置情報の取得がタイムアウトしました。再度お試しください。';
+                            }
+                            showBanner(message, 'error');
+                            reject(error);
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 60000,
+                        }
+                    );
+                });
+            }
+
+            // --- イベントリスナー設定 ---
+
+            // カテゴリボタンクリック（イベント委譲）
+            dom.categoryFilters.addEventListener('click', (e) => {
+                const btn = e.target.closest('.category-btn');
+                if (!btn) return;
+                const category = btn.dataset.category;
+                if (category === state.selectedCategory) return;
+
+                state.selectedCategory = category;
+                renderCategoryButtons();
+                renderAll();
+            });
+
+            // 現在地取得ボタン
+            dom.locateBtn.addEventListener('click', async () => {
+                try {
+                    await requestUserLocation();
+                    renderAll();
+                } catch (_) {
+                    // エラーバナーは requestUserLocation 内で表示済み
+                }
+            });
+
+            // 近い順にソートボタン（未取得なら自動で現在地を取得してからソート）
+            dom.sortDistanceBtn.addEventListener('click', async () => {
+                if (!state.userLocation) {
+                    try {
+                        await requestUserLocation();
+                        state.sortByDistance = true;
+                        renderAll();
+                    } catch (_) {
+                        // 取得失敗時は標準順のまま
+                    }
+                    return;
+                }
+
+                state.sortByDistance = !state.sortByDistance;
+                renderAll();
+            });
+
+            // カード内「地図で見る」ボタンクリック（イベント委譲）
+            dom.spotList.addEventListener('click', (e) => {
+                const btn = e.target.closest('.focus-map-btn');
+                if (!btn) return;
+                const spotId = Number(btn.dataset.focusId);
+                const spot = state.spots.find((s) => s.id === spotId);
+                const marker = state.markersById.get(spotId);
+                if (!spot || !marker) return;
+
+                dom.mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                map.setView([spot.latitude, spot.longitude], 15, { animate: true });
+                marker.openPopup();
+            });
+
+            // 通知バナー閉じるボタン
+            dom.statusCloseBtn.addEventListener('click', hideBanner);
+
+            // --- 初期化実行 ---
+            loadSpots();
+        })();
+    </script>
+</body>
+</html>
